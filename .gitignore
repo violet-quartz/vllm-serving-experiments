@@ -1,0 +1,4 @@
+.DS_Store
+*.json          # ShareGPT 数据集之类的大文件，如果以后放进来
+__pycache__/
+.venv/

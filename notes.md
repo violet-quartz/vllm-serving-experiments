@@ -1,0 +1,296 @@
+# 实验方法
+
+## 1. 启动 vLLM 服务
+
+### 1.1 机器与镜像
+
+从 autodl 上选择了一台 RTX 4090，基础镜像为 Python 3.12 + PyTorch 2.12.1 + CUDA 13.0。
+
+### 1.2 查看 GPU 状态
+
+用 `nvidia-smi` 查看 GPU 状态总览：
+
+![初始 nvidia-smi](assets/nvidia-smi.png)
+
+用 `nvidia-smi -q -d POWER` 查看 GPU 功耗相关的详细信息：
+
+![初始 nvidia-smi 功耗信息](assets/nvidia-power.png)
+
+再验证一下能否通过代码使用 NVML 读取 GPU 状态：
+
+```bash
+pip install nvidia-ml-py
+```
+
+```python
+import pynvml
+
+pynvml.nvmlInit()
+h = pynvml.nvmlDeviceGetHandleByIndex(0)
+
+# 累计能耗（毫焦 mJ）
+energy = pynvml.nvmlDeviceGetTotalEnergyConsumption(h)
+print("能耗计数器(mJ):", energy)
+
+# 瞬时功率（毫瓦 mW）
+power = pynvml.nvmlDeviceGetPowerUsage(h)
+print("当前功率(mW):", power)
+
+pynvml.nvmlShutdown()
+```
+
+### 1.3 安装 vLLM
+
+```bash
+pip install vllm
+```
+
+```bash
+vllm --version
+# 0.25.1
+```
+
+### 1.4 下载模型
+
+从 modelscope 下载模型（国内友好）：
+
+```bash
+pip install modelscope
+modelscope download --model Qwen/Qwen2.5-7B-Instruct \
+    --local_dir /root/autodl-tmp/qwen2_5-7b-instruct
+```
+
+### 1.5 启动服务
+
+```bash
+vllm serve /root/autodl-tmp/qwen2_5-7b-instruct/ \
+    --served_model_name qwen2.5-7b-instruct \
+    --port 8000
+```
+
+这里加上 `--served_model_name` 是指定调用 API 时需要填写的模型名；不指定的话，模型名就是本地文件路径了。
+
+从日志中可以看到模型加载花费了 4.55 秒。
+
+### 1.6 验证服务
+
+开启另一个终端发起请求：
+
+```bash
+curl http://localhost:8000/v1/models
+```
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5-7b-instruct",
+    "messages": [{"role": "user", "content": "你好，用一句话介绍你自己"}]
+  }'
+```
+
+能够正确得到回复。
+
+此时的 GPU 概览：
+
+![启动 vLLM 后的 nvidia-smi](assets/vllm_nvidia-smi.png)
+
+此时的 server 日志：
+
+![vLLM server 日志](assets/vllm_server.png)
+
+## 2. 压测，拿到基线性能数据
+
+### 2.1 指标说明
+
+| 指标 | 含义 |
+| --- | --- |
+| 吞吐 | 单位时间内处理的 token 数（tok/s） |
+| TTFT | Time To First Token，从发出请求到收到第一个 token 的耗时 |
+| TPOT | Time Per Output Token，首 token 之后，平均每生成一个 token 的耗时 |
+
+### 2.2 压测方法
+
+下载数据集：
+
+```bash
+wget https://hf-mirror.com/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json
+```
+
+固定 `--num-prompts 200`，只改变 `--max-concurrency`，依次取 1、4、8、16、32：
+
+```bash
+vllm bench serve \
+  --model /root/autodl-tmp/qwen2_5-7b-instruct/ \
+  --served_model_name qwen2.5-7b-instruct \
+  --dataset-name sharegpt \
+  --dataset-path /root/datasets/ShareGPT_V3_unfiltered_cleaned_split.json \
+  --num-prompts 200 \
+  --max-concurrency <N>
+```
+
+### 2.3 压测原始输出
+
+并发为 1：
+
+```text
+============ Serving Benchmark Result ============
+Successful requests:                     200       
+Failed requests:                         0         
+Maximum request concurrency:             1         
+Benchmark duration (s):                  694.60    
+Total input tokens:                      43560     
+Total generated tokens:                  43491     
+Request throughput (req/s):              0.29      
+Output token throughput (tok/s):         62.61     
+Peak output token throughput (tok/s):    63.00     
+Peak concurrent requests:                5.00      
+Total token throughput (tok/s):          125.33    
+---------------Time to First Token----------------
+Mean TTFT (ms):                          27.44     
+Median TTFT (ms):                        26.71     
+P99 TTFT (ms):                           36.55     
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          15.90     
+Median TPOT (ms):                        15.91     
+P99 TPOT (ms):                           15.96     
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           15.92     
+Median ITL (ms):                         15.90     
+P99 ITL (ms):                            17.16     
+==================================================
+```
+
+并发为 4：
+
+```text
+============ Serving Benchmark Result ============
+Successful requests:                     200       
+Failed requests:                         0         
+Maximum request concurrency:             4         
+Benchmark duration (s):                  184.44    
+Total input tokens:                      43560     
+Total generated tokens:                  43786     
+Request throughput (req/s):              1.08      
+Output token throughput (tok/s):         237.41    
+Peak output token throughput (tok/s):    248.00    
+Peak concurrent requests:                10.00     
+Total token throughput (tok/s):          473.59    
+---------------Time to First Token----------------
+Mean TTFT (ms):                          48.76     
+Median TTFT (ms):                        48.59     
+P99 TTFT (ms):                           59.06     
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          16.22     
+Median TPOT (ms):                        16.22     
+P99 TPOT (ms):                           16.31     
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           16.22     
+Median ITL (ms):                         16.20     
+P99 ITL (ms):                            18.18     
+==================================================
+```
+
+并发为 8：
+
+```text
+============ Serving Benchmark Result ============
+Successful requests:                     200       
+Failed requests:                         0         
+Maximum request concurrency:             8         
+Benchmark duration (s):                  97.94     
+Total input tokens:                      43560     
+Total generated tokens:                  44124     
+Request throughput (req/s):              2.04      
+Output token throughput (tok/s):         450.51    
+Peak output token throughput (tok/s):    496.00    
+Peak concurrent requests:                15.00     
+Total token throughput (tok/s):          895.27    
+---------------Time to First Token----------------
+Mean TTFT (ms):                          57.75     
+Median TTFT (ms):                        50.50     
+P99 TTFT (ms):                           115.21    
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          16.60     
+Median TPOT (ms):                        16.44     
+P99 TPOT (ms):                           18.48     
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           16.59     
+Median ITL (ms):                         16.32     
+P99 ITL (ms):                            20.17     
+==================================================
+```
+
+并发为 16：
+
+```text
+============ Serving Benchmark Result ============
+Successful requests:                     200       
+Failed requests:                         0         
+Maximum request concurrency:             16        
+Benchmark duration (s):                  52.52     
+Total input tokens:                      43560     
+Total generated tokens:                  43964     
+Request throughput (req/s):              3.81      
+Output token throughput (tok/s):         837.13    
+Peak output token throughput (tok/s):    958.00    
+Peak concurrent requests:                26.00     
+Total token throughput (tok/s):          1666.56   
+---------------Time to First Token----------------
+Mean TTFT (ms):                          54.32     
+Median TTFT (ms):                        52.04     
+P99 TTFT (ms):                           84.37     
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          16.80     
+Median TPOT (ms):                        16.82     
+P99 TPOT (ms):                           17.15     
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           16.82     
+Median ITL (ms):                         16.70     
+P99 ITL (ms):                            21.41     
+==================================================
+```
+
+并发为 32：
+
+```text
+============ Serving Benchmark Result ============
+Successful requests:                     200       
+Failed requests:                         0         
+Maximum request concurrency:             32        
+Benchmark duration (s):                  34.43     
+Total input tokens:                      43560     
+Total generated tokens:                  44009     
+Request throughput (req/s):              5.81      
+Output token throughput (tok/s):         1278.33   
+Peak output token throughput (tok/s):    1694.00   
+Peak concurrent requests:                46.00     
+Total token throughput (tok/s):          2543.61   
+---------------Time to First Token----------------
+Mean TTFT (ms):                          144.85    
+Median TTFT (ms):                         76.44    
+P99 TTFT (ms):                           769.86    
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          21.40     
+Median TPOT (ms):                        20.62     
+P99 TPOT (ms):                           41.55     
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           20.54     
+Median ITL (ms):                         18.37     
+P99 ITL (ms):                            73.99     
+==================================================
+```
+
+### 2.4 压测数据统计
+
+| 并发数 | 吞吐 (tok/s) | TTFT 均值 (ms) | TTFT-P99 (ms) | TPOT 均值 (ms) | TPOT-P99 (ms) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 125.33 | 27.44 | 36.55 | 15.90 | 15.96 |
+| 4 | 473.59 | 48.76 | 59.06 | 16.22 | 16.31 |
+| 8 | 895.27 | 57.75 | 115.21 | 16.60 | 18.48 |
+| 16 | 1666.56 | 54.32 | 84.37 | 16.80 | 17.15 |
+| 32 | 2543.61 | 144.85 | 769.86 | 21.40 | 41.55 |
+
+> **吞吐**取 Total token throughput（输入 + 输出）。对应的 Output token throughput 依次为 62.61 / 237.41 / 450.51 / 837.13 / 1278.33 tok/s。
+
+> 并发 16 的 TTFT 均值（54.32 ms）反而低于并发 8（57.75 ms），是因为并发 8 那次的 P99 被拖到了 115 ms（个别长请求），并非趋势异常。真正的拐点在并发 32：TTFT-P99 跳到 769.86 ms，TPOT-P99 翻倍到 41.55 ms，说明此时已经开始排队了。
