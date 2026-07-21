@@ -16,13 +16,10 @@ editing that one function; everything downstream is unchanged.
 """
 import argparse, json, os, signal, subprocess, sys, time
 
-# ─────────────────────────────────────────────────────────────────────────────
-# EDIT HERE to change engine / flags. Flag names vary across vLLM versions —
-# verify with `vllm bench serve --help`. This is the one version-sensitive spot.
 def build_bench_cmd(args, concurrency, num_prompts, result_path):
     return [
         "vllm", "bench", "serve",
-        "--backend", "vllm",
+        "--backend", args.backend,
         "--base-url", args.base_url,
         "--model", args.model,
         "--served-model-name", args.served_model_name,
@@ -46,6 +43,7 @@ def main():
     ap.add_argument("--model", required=True, help="model id the server was started with")
     ap.add_argument("--served-model-name", required=True, help="model name of the served model")
     ap.add_argument("--dataset-path", required=True, help="ShareGPT json path")
+    ap.add_argument("--backend", default="openai-chat", help="backend argument for vllm bench serve.")
     ap.add_argument("--base-url", default="http://127.0.0.1:8000")
     ap.add_argument("--endpoint", default="/v1/chat/completions")
     ap.add_argument("--concurrency", default="1,4,8,16,32")

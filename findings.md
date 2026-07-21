@@ -6,6 +6,9 @@
 - autodl
     - download from huggingface，`export HF_ENDPOINT=https://hf-mirror.com`
     - clone from github, 在终端中输入 `source /etc/network_turbo` 可加速
+    - 从远程机器下载数据 scp -rP 35394 root@region-1.autodl.com:<实例中的文件/文件夹> <本地文件/文件夹> （注意需要在您本地的机器上执行）
 - vllm 官方压测脚本
   -  压测测的是服务端的延迟和吞吐。如果客户端每条请求都重新建 TCP 连接、重新做 TLS 握手、重新解析 DNS，那测出来的 TTFT
   里就混进了大量"客户端自己的开销"，数据就不准了。所以这里把连接层调成"尽量复用、尽量不重连"。
+- vllm bench serve 
+    - --backend 和 --endpoint 参数要配套，/v1/completions 和 /v1/chat/completions 不同

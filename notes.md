@@ -129,6 +129,8 @@ vllm bench serve \
   --max-concurrency <N>
 ```
 
+刚刚发现，这样子测的是 /v1/completions 接口，不是 /v1/chat/completions 接口。
+
 ### 2.3 压测原始输出
 
 并发为 1：
@@ -298,11 +300,27 @@ P99 ITL (ms):                            73.99
 
 # 3. 使用脚本进行压测，同时统计耗能数据
 
-首先保证 vllm server 在一个终端被拉起， 在另外一个终端中输入：
+## 3.1 使用 vllm serve bench 进行压测
+
+核心思路：性能和能耗在同一个时间窗口里并行采集,事后靠时间戳对齐拼起来。采样器和驱动跑在同一台机器，用同一个 wall-clock，没有时钟漂移问题
+
+三个解耦模块：
+- 压测模块:vllm bench serve 打 chat 端点,按并发档(1/4/8/16/32)逐档发 ShareGPT 请求,产出客户端侧的吞吐、TTFT、TPOT/ITL,存成 JSON。
+- 能耗采样器:一个独立后台进程,每 200ms 读一次 NVML 的整卡计数器——累计能耗(mJ)、功率、利用率、显存、频率、温度——带时间戳写进 CSV。它不 import 任何引擎,GPU 上跑 vLLM 还是 SGLang 它都一样读。
+- 离线对齐分析:把 CSV 和每档的时间窗口、benchmark JSON join 起来,算出每档的 J/token。
+
+测量流程
+- idle 窗口:模型常驻显存、不发任何请求,空测一段,拿到 idle 功率。
+- warmup:先跑一轮小请求量丢弃,把冷启动和 CUDA graph 编译排除在正式数据外。
+- 正式窗口:记下 t_start,跑正式 benchmark,记下 t_end,把这个窗口和对应的 result JSON 路径写进 windows.jsonl
+
+能耗计算:在窗口两端对累计能耗计数器做插值取差值(end − start)，而不是拿瞬时功率去积分估。这个 delta 就是这一档的总能耗，除以 benchmark JSON 里服务端报的总输出 token，得到 J/token;另外再出 J/total-token、J/request。
+
+首先保证 vllm server 在一个终端被拉起， 在另外一个终端中（进入 src/）输入来获取实验数据：
 
 ```bash
 # vLLM server 已在另一个终端跑着
-python src/run_sweep.py \
+python run_sweep.py \
   --model /root/autodl-tmp/qwen2_5-7b-instruct/ \
   --served-model-name qwen2.5-7b-instruct \
   --dataset-path /root/datasets/ShareGPT_V3_unfiltered_cleaned_split.json \
@@ -310,6 +328,22 @@ python src/run_sweep.py \
   --concurrency 1,4,8,16,32 --num-prompts 200
 ```
 
+分析实验数据：
 ```bash
 python analyze.py --csv energy.csv --windows run/windows.jsonl --out run/summary
 ```
+
+绘图：
+```bash
+python plot.py --summary run/summary.csv --csv energy.csv \
+               --windows run/windows.jsonl --outdir run
+```
+
+实验结果放在：/experiments/vllm_bench_serve
+
+
+
+## 3.2 理解 vllm bench 压测后，自己写压测脚本
+
+vLLM 在线压测的精简学习版： /src/mini_bench.py
+
