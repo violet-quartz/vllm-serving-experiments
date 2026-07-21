@@ -294,3 +294,22 @@ P99 ITL (ms):                            73.99
 > **吞吐**取 Total token throughput（输入 + 输出）。对应的 Output token throughput 依次为 62.61 / 237.41 / 450.51 / 837.13 / 1278.33 tok/s。
 
 > 并发 16 的 TTFT 均值（54.32 ms）反而低于并发 8（57.75 ms），是因为并发 8 那次的 P99 被拖到了 115 ms（个别长请求），并非趋势异常。真正的拐点在并发 32：TTFT-P99 跳到 769.86 ms，TPOT-P99 翻倍到 41.55 ms，说明此时已经开始排队了。
+
+
+# 3. 使用脚本进行压测，同时统计耗能数据
+
+首先保证 vllm server 在一个终端被拉起， 在另外一个终端中输入：
+
+```bash
+# vLLM server 已在另一个终端跑着
+python src/run_sweep.py \
+  --model /root/autodl-tmp/qwen2_5-7b-instruct/ \
+  --served-model-name qwen2.5-7b-instruct \
+  --dataset-path /root/datasets/ShareGPT_V3_unfiltered_cleaned_split.json \
+  --sampler-out energy.csv \
+  --concurrency 1,4,8,16,32 --num-prompts 200
+```
+
+```bash
+python analyze.py --csv energy.csv --windows run/windows.jsonl --out run/summary
+```
