@@ -363,12 +363,12 @@ python plot.py --summary run/summary.csv --csv energy.csv \
 
 ```bash
 # vLLM server 已在另一个终端跑着
-python run_sweep.py \
+python run_sweep.py \d
   --model /root/autodl-tmp/qwen2_5-7b-instruct/ \
   --served-model-name qwen2.5-7b-instruct \
   --dataset-path /root/datasets/ShareGPT_V3_unfiltered_cleaned_split.json \
   --sampler-out energy.csv \
-  --concurrency 1,4,8,16,32,48,64 --num-prompts 500
+  --concurrency 8,16,32,48,64,128 --num-prompts 400
 ```
 
 分析实验数据：
@@ -382,6 +382,18 @@ python plot.py --summary run/summary.csv --csv energy.csv \
                --windows run/windows.jsonl --outdir run
 ```
 
+感觉并发 128 的情况下，引擎状态依然 OK。见 /run3
+
+怀疑不同档位之前都测 400 条数据，受到 KV cache prefix caching 的影响，所以在启动 vllm 时关闭 prefix caching， 再次运行脚本， 结果放在 /run4
+
+```bash
+vllm serve /root/autodl-tmp/qwen2_5-7b-instruct/ \
+    --served_model_name qwen2.5-7b-instruct \
+    --port 8000
+    --no-enable-prefix-caching
+```
+
+能够看出，对 performance 是有影响的
 
 ## 3.2 理解 vllm bench 压测后，自己写压测脚本
 

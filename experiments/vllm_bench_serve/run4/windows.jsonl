@@ -1,0 +1,7 @@
+{"label": "idle", "concurrency": 0, "phase": "idle", "t_start": 1784727985.380632, "t_end": 1784728015.3807204, "result_json": null}
+{"label": "c8", "concurrency": 8, "phase": "measured", "t_start": 1784728066.2784483, "t_end": 1784728523.6714861, "result_json": "run/result_c8.json"}
+{"label": "c16", "concurrency": 16, "phase": "measured", "t_start": 1784728571.6126475, "t_end": 1784728820.9907517, "result_json": "run/result_c16.json"}
+{"label": "c32", "concurrency": 32, "phase": "measured", "t_start": 1784728864.9583328, "t_end": 1784729026.0035093, "result_json": "run/result_c32.json"}
+{"label": "c48", "concurrency": 48, "phase": "measured", "t_start": 1784729069.608758, "t_end": 1784729193.1228828, "result_json": "run/result_c48.json"}
+{"label": "c64", "concurrency": 64, "phase": "measured", "t_start": 1784729237.3529694, "t_end": 1784729342.4405625, "result_json": "run/result_c64.json"}
+{"label": "c128", "concurrency": 128, "phase": "measured", "t_start": 1784729387.3806043, "t_end": 1784729471.2626386, "result_json": "run/result_c128.json"}
