@@ -341,6 +341,12 @@ python plot.py --summary run/summary.csv --csv energy.csv \
 
 实验结果放在：/experiments/vllm_bench_serve
 
+吞吐随并发的变化（output tokens/s 与 total tokens/s）：
+
+![吞吐 vs 并发](assets/throughput_vs_concurrency.png)
+
+可以看到并发从 1 涨到 32，吞吐近乎线性提升，说明在这个区间 GPU 还没被打满、批处理收益仍在持续兑现。
+
 
 
 ## 3.2 理解 vllm bench 压测后，自己写压测脚本

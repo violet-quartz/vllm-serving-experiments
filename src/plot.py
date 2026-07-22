@@ -4,6 +4,11 @@ plot.py — turn summary.csv + energy.csv into the two figures for your README.
 
   fig 1  J/token vs concurrency   (raw vs idle-adjusted "dynamic" — the story)
   fig 2  power vs time            (optionally shading each measured window)
+  fig 3  throughput vs concurrency (output & total token throughput)
+  fig 4  latency vs concurrency    (TTFT and TPOT, mean vs P99)
+
+figs 3-4 read the per-concurrency benchmark result JSONs pointed to by
+windows.jsonl, so they need --windows (skipped if it's missing).
 
 Pure stdlib + matplotlib (Agg backend, no display needed on a headless server).
 
@@ -37,6 +42,83 @@ def plot_jtoken(summary_csv, out):
     ax.set_xlabel("concurrency"); ax.set_ylabel("J / output token")
     ax.set_title("Energy per output token vs concurrency")
     ax.grid(True, which="both", alpha=0.3); ax.legend()
+    fig.tight_layout(); fig.savefig(out, dpi=150)
+    print(f"wrote {out}")
+
+def load_perf(windows_path):
+    """From windows.jsonl, load each measured window's benchmark result JSON.
+
+    Returns a list of dicts (one per concurrency, sorted) carrying the perf
+    fields we plot. result_json paths in windows.jsonl are relative to the
+    experiment dir, so resolve them against the windows file's directory too.
+    """
+    base = os.path.dirname(os.path.abspath(windows_path))
+    rows = []
+    for w in (json.loads(l) for l in open(windows_path) if l.strip()):
+        if w.get("phase") != "measured" or not w.get("result_json"):
+            continue
+        p = w["result_json"]
+        if not os.path.exists(p):
+            p = os.path.join(base, os.path.basename(p))
+        if not os.path.exists(p):
+            print(f"  ! result json missing for {w['label']}: {w['result_json']}")
+            continue
+        d = json.load(open(p))
+        rows.append({
+            "concurrency":  fnum(w.get("concurrency")),
+            "out_tput":     fnum(d.get("output_throughput")),
+            "total_tput":   fnum(d.get("total_token_throughput")),
+            "mean_ttft":    fnum(d.get("mean_ttft_ms")),
+            "p99_ttft":     fnum(d.get("p99_ttft_ms")),
+            "mean_tpot":    fnum(d.get("mean_tpot_ms")),
+            "p99_tpot":     fnum(d.get("p99_tpot_ms")),
+        })
+    rows = [r for r in rows if r["concurrency"] is not None]
+    rows.sort(key=lambda r: r["concurrency"])
+    return rows
+
+def _log2_xaxis(ax, x):
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(x); ax.set_xticklabels([str(int(v)) for v in x])
+    ax.set_xlabel("concurrency")
+
+def plot_throughput(perf, out):
+    if not perf:
+        print("no perf rows; skipping throughput plot"); return
+    x     = [r["concurrency"] for r in perf]
+    out_t = [r["out_tput"]   for r in perf]
+    tot_t = [r["total_tput"] for r in perf]
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    ax.plot(x, out_t, "o-", color="tab:green",  label="output tokens/s")
+    ax.plot(x, tot_t, "s--", color="tab:blue",  label="total tokens/s (in+out)")
+    _log2_xaxis(ax, x)
+    ax.set_ylabel("throughput (tok/s)")
+    ax.set_title("Throughput vs concurrency")
+    ax.grid(True, which="both", alpha=0.3); ax.legend()
+    fig.tight_layout(); fig.savefig(out, dpi=150)
+    print(f"wrote {out}")
+
+def plot_latency(perf, out):
+    if not perf:
+        print("no perf rows; skipping latency plot"); return
+    x = [r["concurrency"] for r in perf]
+
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11, 4.5))
+    # TTFT (left)
+    axL.plot(x, [r["mean_ttft"] for r in perf], "o-",  color="tab:orange", label="mean")
+    axL.plot(x, [r["p99_ttft"]  for r in perf], "s--", color="tab:red",    label="P99")
+    _log2_xaxis(axL, x)
+    axL.set_ylabel("TTFT (ms)"); axL.set_title("Time to first token")
+    axL.grid(True, which="both", alpha=0.3); axL.legend()
+    # TPOT (right)
+    axR.plot(x, [r["mean_tpot"] for r in perf], "o-",  color="tab:purple", label="mean")
+    axR.plot(x, [r["p99_tpot"]  for r in perf], "s--", color="tab:brown",  label="P99")
+    _log2_xaxis(axR, x)
+    axR.set_ylabel("TPOT (ms)"); axR.set_title("Time per output token")
+    axR.grid(True, which="both", alpha=0.3); axR.legend()
+
+    fig.suptitle("Latency vs concurrency")
     fig.tight_layout(); fig.savefig(out, dpi=150)
     print(f"wrote {out}")
 
@@ -81,6 +163,12 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     plot_jtoken(args.summary, os.path.join(args.outdir, "jtoken_vs_concurrency.png"))
     plot_power(args.csv, args.windows, os.path.join(args.outdir, "power_timeline.png"))
+    if args.windows and os.path.exists(args.windows):
+        perf = load_perf(args.windows)
+        plot_throughput(perf, os.path.join(args.outdir, "throughput_vs_concurrency.png"))
+        plot_latency(perf,    os.path.join(args.outdir, "latency_vs_concurrency.png"))
+    else:
+        print("no --windows; skipping throughput/latency plots")
 
 if __name__ == "__main__":
     main()

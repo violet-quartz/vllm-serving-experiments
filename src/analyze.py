@@ -17,7 +17,7 @@ Usage:
 import argparse, bisect, csv, json, os, sys
 
 def load_samples(path):
-    ts, energy_mj, power_mw = [], [], []
+    ts, energy_mj, power_mw, util = [], [], [], []
     with open(path) as f:
         for row in csv.DictReader(f):
             try:
@@ -27,9 +27,11 @@ def load_samples(path):
             ts.append(t); energy_mj.append(e)
             try: power_mw.append(float(row["power_mw"]))
             except (ValueError, KeyError): power_mw.append(float("nan"))
+            try: util.append(float(row["util_gpu"]))
+            except (ValueError, KeyError): util.append(float("nan"))
     if len(ts) < 2:
         sys.exit("analyze: not enough samples in CSV")
-    return ts, energy_mj, power_mw
+    return ts, energy_mj, power_mw, util
 
 def interp(ts, vals, t):
     """Linear-interpolate vals at time t. Clamp to ends with a warning."""
@@ -48,6 +50,28 @@ def interp(ts, vals, t):
 def energy_J(ts, energy_mj, t0, t1):
     return (interp(ts, energy_mj, t1) - interp(ts, energy_mj, t0)) / 1000.0
 
+def steady_power_W(ts, power_mw, util, t0, t1, util_thresh):
+    """Average instantaneous power (W) over samples inside [t0,t1] whose GPU
+    utilization is >= util_thresh.
+
+    Why: avg_power_W = energy_J/dur averages the WHOLE window, including the
+    client ramp-up before the GPU saturates and the drain as the last requests
+    finish. Those low-power edges have a fixed duration but the window shrinks
+    fast with concurrency (728s -> 46s here), so for short windows they dilute
+    the mean and make high concurrency look *less* power-hungry than it is at
+    steady state. Filtering on utilization keeps only the genuinely-loaded
+    samples, so this number is comparable across concurrency levels.
+    Returns (power_W, n_samples_used); power_W is None if nothing qualifies.
+    """
+    vals = [power_mw[i] / 1000.0
+            for i in range(len(ts))
+            if t0 <= ts[i] <= t1
+            and power_mw[i] == power_mw[i]          # not NaN
+            and util[i] == util[i] and util[i] >= util_thresh]
+    if not vals:
+        return None, 0
+    return sum(vals) / len(vals), len(vals)
+
 # Token fields differ across vLLM versions — try several, print what we used.
 OUT_KEYS = ["total_output_tokens", "output_tokens", "total_generated_tokens"]
 IN_KEYS  = ["total_input_tokens", "input_tokens", "total_prompt_tokens"]
@@ -64,9 +88,11 @@ def main():
     ap.add_argument("--csv", required=True)
     ap.add_argument("--windows", required=True)
     ap.add_argument("--out", default="summary")
+    ap.add_argument("--util-thresh", type=float, default=90.0,
+                    help="min GPU util%% for a sample to count toward steady_power_W")
     args = ap.parse_args()
 
-    ts, energy_mj, power_mw = load_samples(args.csv)
+    ts, energy_mj, power_mw, util = load_samples(args.csv)
     windows = [json.loads(l) for l in open(args.windows) if l.strip()]
 
     # idle power for the adjustment
@@ -87,6 +113,8 @@ def main():
         dur = t1 - t0
         ej = energy_J(ts, energy_mj, t0, t1)
         avg_p = ej / dur
+        steady_p, n_steady = steady_power_W(ts, power_mw, util, t0, t1, args.util_thresh)
+        frac_steady = n_steady / max(1, sum(1 for tt in ts if t0 <= tt <= t1))
 
         out_tok = in_tok = req = None
         if w.get("result_json") and os.path.exists(w["result_json"]):
@@ -101,6 +129,8 @@ def main():
         r = {"level": w["label"], "concurrency": w["concurrency"],
              "dur_s": round(dur, 1), "energy_J": round(ej, 1),
              "avg_power_W": round(avg_p, 1),
+             "steady_power_W": round(steady_p, 1) if steady_p is not None else "",
+             "steady_frac": round(frac_steady, 3),
              "out_tokens": out_tok, "in_tokens": in_tok, "requests": req}
         if out_tok:
             r["J_per_out_token"] = round(ej / out_tok, 4)
@@ -115,6 +145,7 @@ def main():
 
     # print a table
     cols = ["level", "concurrency", "dur_s", "energy_J", "avg_power_W",
+            "steady_power_W", "steady_frac",
             "out_tokens", "J_per_out_token", "J_per_out_token_dyn",
             "J_per_total_token", "J_per_request"]
     print("\n" + "  ".join(f"{c:>18}" for c in cols))
