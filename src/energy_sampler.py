@@ -10,7 +10,7 @@ Usage:
     python energy_sampler.py --out energy.csv --gpu 0 --interval 0.2
 Stop with Ctrl-C (SIGINT) or SIGTERM; the CSV is flushed on exit.
 
-Correctness points (you'll be asked about these in interviews):
+Correctness points:
 - Energy comes from the CUMULATIVE counter nvmlDeviceGetTotalEnergyConsumption (mJ),
   NOT from integrating instantaneous power. Consumers take (end - start) deltas.
 - power/util/clock/temp are sampled only for curves, plots, and sanity cross-checks.

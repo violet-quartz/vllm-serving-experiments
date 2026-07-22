@@ -99,7 +99,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 ![vLLM server 日志](assets/vllm_server.png)
 
-## 2. 压测，拿到基线性能数据
+## 2. 使用 vllm bench serve 进行压测
 
 ### 2.1 指标说明
 
@@ -316,6 +316,8 @@ P99 ITL (ms):                            73.99
 
 能耗计算:在窗口两端对累计能耗计数器做插值取差值(end − start)，而不是拿瞬时功率去积分估。这个 delta 就是这一档的总能耗，除以 benchmark JSON 里服务端报的总输出 token，得到 J/token;另外再出 J/total-token、J/request。
 
+### 3.1.2 首次压测
+
 首先保证 vllm server 在一个终端被拉起， 在另外一个终端中（进入 src/）输入来获取实验数据：
 
 ```bash
@@ -339,14 +341,46 @@ python plot.py --summary run/summary.csv --csv energy.csv \
                --windows run/windows.jsonl --outdir run
 ```
 
-实验结果放在：/experiments/vllm_bench_serve
+实验结果放在：/experiments/vllm_bench_serve/run1 中
 
-吞吐随并发的变化（output tokens/s 与 total tokens/s）：
+实验结论：
+- 性能上，随着并发的增加，TTFT/TPOT 不断增加，吞吐也不断上升，其中并发从 16 增加到 32 之后，TPOT 大幅增加；
 
-![吞吐 vs 并发](assets/throughput_vs_concurrency.png)
+![latency_1](experiments/vllm_bench_serve/run1/latency_vs_concurrency.png)
+![throughput_1](experiments/vllm_bench_serve/run1/throughput_vs_concurrency.png)
+- 耗能上，
+  - 随着并发的增加，单位 token 的能耗不断下降，但下降幅度下降，有收敛的趋势。 说明目前的显存带宽是平静，而不是算力是瓶颈，batching 使得原本空转的算力用了起来。但随着算力逐渐达到饱和，单位 token 的能耗就回见底，可以增加并发找到这个拐点。
+  ![jtoken_1](experiments/vllm_bench_serve/run1/jtoken_vs_concurrency.png)
+  - power_timeline 里并发 1 的平均功率(316.9W)反而比并发 4/8(275/264W)还高，反直觉。
+    - 原因：avg_power_W = 窗口总能耗 / 窗口时长，窗口两端有客户端爬坡(GPU 没喂满)和收尾 drain 的低功耗段(~50W)。这段绝对时长基本固定，但窗口时长随并发暴跌(728s→46s)，所以短窗口(高并发)被稀释得厉害——窗口内 util<50% 的采样占比从并发 1 的 1.9% 一路涨到并发 32 的 31.6%。
+    - 真相：只取 util≥90% 的稳态采样求平均，各档功率其实基本持平在 ~310–340W（并发 1 和 32 都顶在 ~340W）。batch=1 的 decode 是显存带宽瓶颈，每步都要读一遍全部权重，即使单路也把显存打满、SM 频率顶到最高，所以稳态功率一点不低。
+    - 解决：analyze.py 新增 steady_power_W 列（util≥阈值再求平均，阈值由 --util-thresh 控制，默认 90），另出 steady_frac 记录窗口内满载采样占比。J/token 的能量仍用整窗口累计计数器差值(end−start)，不动。
+  ![power_1](experiments/vllm_bench_serve/run1/power_timeline.png)
 
-可以看到并发从 1 涨到 32，吞吐近乎线性提升，说明在这个区间 GPU 还没被打满、批处理收益仍在持续兑现。
+### 3.1.2 改进后继续实验
 
+首先保证 vllm server 在一个终端被拉起， 在另外一个终端中（进入 src/）输入来获取实验数据：
+
+```bash
+# vLLM server 已在另一个终端跑着
+python run_sweep.py \
+  --model /root/autodl-tmp/qwen2_5-7b-instruct/ \
+  --served-model-name qwen2.5-7b-instruct \
+  --dataset-path /root/datasets/ShareGPT_V3_unfiltered_cleaned_split.json \
+  --sampler-out energy.csv \
+  --concurrency 1,4,8,16,32,48,64 --num-prompts 500
+```
+
+分析实验数据：
+```bash
+python analyze.py --csv energy.csv --windows run/windows.jsonl --out run/summary
+```
+
+绘图：
+```bash
+python plot.py --summary run/summary.csv --csv energy.csv \
+               --windows run/windows.jsonl --outdir run
+```
 
 
 ## 3.2 理解 vllm bench 压测后，自己写压测脚本
