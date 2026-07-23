@@ -95,6 +95,26 @@ def main():
     ts, energy_mj, power_mw, util = load_samples(args.csv)
     windows = [json.loads(l) for l in open(args.windows) if l.strip()]
 
+    # Drop windows that fall outside the sampler's time range. This happens when
+    # an outdir is reused: run_sweep.py APPENDS to windows.jsonl while the sampler
+    # OVERWRITES energy.csv, so windows.jsonl can carry stale windows from earlier
+    # sweeps. Without this guard, energy_J() interpolates those out-of-range edges
+    # by clamping to the CSV ends -> a zero-energy delta -> bogus rows that poison
+    # the plots. Require the whole window to sit inside [ts[0], ts[-1]].
+    lo, hi = ts[0], ts[-1]
+    kept = []
+    for w in windows:
+        if lo <= w["t_start"] and w["t_end"] <= hi:
+            kept.append(w)
+        else:
+            print(f"  ! skipping window {w.get('label')}/{w.get('phase')} "
+                  f"[{w['t_start']:.0f},{w['t_end']:.0f}] — outside sampler range "
+                  f"[{lo:.0f},{hi:.0f}] (stale window from a reused outdir?)",
+                  file=sys.stderr)
+    if not kept:
+        sys.exit("analyze: no windows fall within the sampler CSV time range")
+    windows = kept
+
     # idle power for the adjustment
     idle_w = None
     for w in windows:

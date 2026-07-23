@@ -300,7 +300,7 @@ P99 ITL (ms):                            73.99
 
 # 3. 使用脚本进行压测，同时统计耗能数据
 
-## 3.1 使用 vllm serve bench 进行压测
+## 3.1 测试方法
 
 核心思路：性能和能耗在同一个时间窗口里并行采集,事后靠时间戳对齐拼起来。采样器和驱动跑在同一台机器，用同一个 wall-clock，没有时钟漂移问题
 
@@ -316,7 +316,7 @@ P99 ITL (ms):                            73.99
 
 能耗计算:在窗口两端对累计能耗计数器做插值取差值(end − start)，而不是拿瞬时功率去积分估。这个 delta 就是这一档的总能耗，除以 benchmark JSON 里服务端报的总输出 token，得到 J/token;另外再出 J/total-token、J/request。
 
-### 3.1.2 首次压测
+## 3.2 首次压测
 
 首先保证 vllm server 在一个终端被拉起， 在另外一个终端中（进入 src/）输入来获取实验数据：
 
@@ -357,13 +357,13 @@ python plot.py --summary run/summary.csv --csv energy.csv \
     - 解决：analyze.py 新增 steady_power_W 列（util≥阈值再求平均，阈值由 --util-thresh 控制，默认 90），另出 steady_frac 记录窗口内满载采样占比。J/token 的能量仍用整窗口累计计数器差值(end−start)，不动。
   ![power_1](experiments/vllm_bench_serve/run1/power_timeline.png)
 
-### 3.1.2 改进后继续实验
+## 3.3 改进后继续实验
 
 首先保证 vllm server 在一个终端被拉起， 在另外一个终端中（进入 src/）输入来获取实验数据：
 
 ```bash
 # vLLM server 已在另一个终端跑着
-python run_sweep.py \d
+python run_sweep.py \
   --model /root/autodl-tmp/qwen2_5-7b-instruct/ \
   --served-model-name qwen2.5-7b-instruct \
   --dataset-path /root/datasets/ShareGPT_V3_unfiltered_cleaned_split.json \
@@ -395,7 +395,85 @@ vllm serve /root/autodl-tmp/qwen2_5-7b-instruct/ \
 
 能够看出，对 performance 是有影响的
 
-## 3.2 理解 vllm bench 压测后，自己写压测脚本
+# 4. 压测量化后模型
 
-vLLM 在线压测的精简学习版： /src/mini_bench.py
+启动 vllm 服务
 
+```bash
+vllm serve /root/autodl-tmp/qwen2_5-7b-instruct/ \
+    --quantization fp8 \
+    --served_model_name qwen2.5-7b-instruct-fp8 \
+    --port 8000
+    --no-enable-prefix-caching
+```
+
+运行命令
+
+```bash
+# vLLM server 已在另一个终端跑着
+python run_sweep.py \
+  --model /root/autodl-tmp/qwen2_5-7b-instruct/ \
+  --served-model-name qwen2.5-7b-instruct-fp8 \
+  --dataset-path /root/datasets/ShareGPT_V3_unfiltered_cleaned_split.json \
+  --sampler-out energy.csv \
+  --concurrency 8,16,32,48,64,128 --num-prompts 400
+```
+
+分析实验数据：
+```bash
+python analyze.py --csv energy.csv --windows run/windows.jsonl --out run/summary
+```
+
+绘图：
+```bash
+python plot.py --summary run/summary.csv --csv energy.csv \
+               --windows run/windows.jsonl --outdir run
+```
+
+```
+vllm bench serve \
+  --model /root/autodl-tmp/qwen2_5-7b-instruct/ \
+  --served_model_name qwen2.5-7b-instruct-fp8 \
+  --dataset-name sharegpt \
+  --dataset-path /root/datasets/ShareGPT_V3_unfiltered_cleaned_split.json \
+  --num-prompts 100 \
+  --max-concurrency 8
+```
+
+结果放在了 run5 之中
+
+## 量化前后对比：run4（FP16 基线）vs run5（FP8 量化）
+
+两次压测使用**完全相同的负载**：`--num-prompts 400`、同一份 ShareGPT 数据集，输出 88490 tokens、输入 92421 tokens 完全一致，并发档对齐（8/16/32/48/64/128），因此可直接对比。run5 的 `--served_model_name` 为 `qwen2.5-7b-instruct-fp8`。
+
+![run4 vs run5 对比](assets/run4_vs_run5.png)
+
+### 性能：run5 全面占优
+
+| 并发 | 吞吐(tok/s) r4→r5 | 提升 | TTFT均值(ms) r4→r5 | TPOT均值(ms) r4→r5 |
+| ---: | :--- | ---: | :--- | :--- |
+| 8 | 406 → 1398 | 3.44x | 218 → 54 | 35.5 → 11.3 |
+| 16 | 765 → 2708 | 3.54x | 218 → 48 | 37.3 → 11.4 |
+| 32 | 1217 → 4605 | 3.78x | 251 → 62 | 43.1 → 12.5 |
+| 48 | 1630 → 6040 | 3.71x | 298 → 82 | 47.3 → 13.5 |
+| 64 | 1957 → 6950 | 3.55x | 377 → 104 | 48.5 → 14.7 |
+| 128 | 2526 → 8750 | 3.46x | 828 → 241 | 64.9 → 20.4 |
+
+吞吐约 **3.4–3.8x**，TTFT/TPOT 均降到约 **1/3**，尾延迟改善最猛（c128 的 TTFT-P99 从 3492ms 降到 586ms）。
+
+### 能耗：每 token 省约 45%，但瞬时功率翻倍
+
+| 并发 | J/token r4→r5 | 省 | 稳态功率(W) r4→r5 | 时长加速 |
+| ---: | :--- | ---: | :--- | ---: |
+| 8 | 0.668 → 0.400 | 40% | 139 → 283 | 3.24x |
+| 16 | 0.385 → 0.211 | 45% | 149 → 286 | 3.17x |
+| 32 | 0.259 → 0.135 | 48% | 157 → 300 | 3.17x |
+| 48 | 0.202 → 0.114 | 44% | 164 → 323 | 2.95x |
+| 64 | 0.179 → 0.099 | 45% | 173 → 329 | 2.80x |
+| 128 | 0.153 → 0.082 | 46% | 191 → 342 | 2.61x |
+
+### 结论
+
+**run5（FP8）用约 2 倍的瞬时功率，换来约 3.5 倍吞吐、约 1/3 的延迟，以及每 token 约 45% 的能耗下降。** 这是量化的典型权衡——功率更高，但吞吐提升更大，能效反而更优；总能耗和单位能耗都降了。能效优势在中高并发（c32~c128）最明显，低并发（c8）时因量化的吞吐优势尚未完全释放，只领先约 40%。
+
+> ⚠️ 待核对：两边 result JSON 的 `model_id` 路径相同，仅 `served_model_name` 标注了 fp8。且 3.5x 吞吐 + 2x 功率对"仅量化"来说偏大，建议核对 run4/run5 的启动参数是否只差量化这一项（尤其 run4 稳态功率仅 ~150W，偏低，需排除是否被 `nvidia-smi -pl` 限过功率），并确认同卡、同镜像。
