@@ -7,14 +7,23 @@ plot.py — turn summary.csv + energy.csv into the two figures for your README.
   fig 3  throughput vs concurrency (output & total token throughput)
   fig 4  latency vs concurrency    (TTFT and TPOT, mean vs P99)
 
+Each figure is drawn only when its inputs are present, so you can run with or
+without the energy sampler:
+  --summary  -> fig 1 (J/token)      omit to skip
+  --csv      -> fig 2 (power)        omit to skip
+  --windows  -> figs 3-4 (tput/lat)  omit to skip
 figs 3-4 read the per-concurrency benchmark result JSONs pointed to by
-windows.jsonl, so they need --windows (skipped if it's missing).
+windows.jsonl.
 
 Pure stdlib + matplotlib (Agg backend, no display needed on a headless server).
 
 Usage:
+    # full run (with energy_sampler)
     python plot.py --summary run/summary.csv --csv energy.csv \
                    --windows run/windows.jsonl --outdir run
+
+    # no energy_sampler: only throughput + latency
+    python plot.py --windows run/windows.jsonl --outdir run
 """
 import argparse, csv, json, os
 import matplotlib
@@ -155,14 +164,27 @@ def plot_power(energy_csv, windows_path, out):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--summary", required=True, help="summary.csv from analyze.py")
-    ap.add_argument("--csv", required=True, help="energy.csv from the sampler")
-    ap.add_argument("--windows", default=None, help="windows.jsonl (optional, for shading)")
+    ap.add_argument("--summary", default=None,
+                    help="summary.csv from analyze.py (optional; needed for the J/token plot)")
+    ap.add_argument("--csv", default=None,
+                    help="energy.csv from the sampler (optional; needed for the power plot)")
+    ap.add_argument("--windows", default=None,
+                    help="windows.jsonl (needed for throughput/latency plots and power shading)")
     ap.add_argument("--outdir", default=".")
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
-    plot_jtoken(args.summary, os.path.join(args.outdir, "jtoken_vs_concurrency.png"))
-    plot_power(args.csv, args.windows, os.path.join(args.outdir, "power_timeline.png"))
+
+    # Energy plots need the sampler outputs; skip them when running without energy_sampler.
+    if args.summary:
+        plot_jtoken(args.summary, os.path.join(args.outdir, "jtoken_vs_concurrency.png"))
+    else:
+        print("no --summary; skipping J/token plot")
+    if args.csv:
+        plot_power(args.csv, args.windows, os.path.join(args.outdir, "power_timeline.png"))
+    else:
+        print("no --csv; skipping power plot")
+
+    # Throughput/latency come from the benchmark result JSONs, no energy data needed.
     if args.windows and os.path.exists(args.windows):
         perf = load_perf(args.windows)
         plot_throughput(perf, os.path.join(args.outdir, "throughput_vs_concurrency.png"))
