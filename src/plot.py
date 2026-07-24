@@ -34,10 +34,7 @@ def fnum(x):
     try: return float(x)
     except (TypeError, ValueError): return None
 
-def plot_jtoken(summary_csv, out):
-    rows = list(csv.DictReader(open(summary_csv)))
-    rows = [r for r in rows if fnum(r.get("concurrency")) is not None]
-    rows.sort(key=lambda r: fnum(r["concurrency"]))
+def plot_jtoken(rows, out):
     x     = [fnum(r["concurrency"]) for r in rows]
     raw   = [fnum(r.get("J_per_out_token")) for r in rows]
     dyn   = [fnum(r.get("J_per_out_token_dyn")) for r in rows]
@@ -162,6 +159,54 @@ def plot_power(energy_csv, windows_path, out):
     fig.tight_layout(); fig.savefig(out, dpi=150)
     print(f"wrote {out}")
 
+def _fmt(v, nd=1):
+    return "-" if v is None else f"{v:.{nd}f}"
+
+def load_summary(summary_csv):
+    """Read summary.csv (from analyze.py) into sorted per-concurrency rows."""
+    rows = [r for r in csv.DictReader(open(summary_csv))
+            if fnum(r.get("concurrency")) is not None]
+    rows.sort(key=lambda r: fnum(r["concurrency"]))
+    return rows
+
+def write_tables(perf, summary_rows, out):
+    """Write the plotted numbers as Markdown tables so they can be pasted into docs."""
+    lines = ["# Benchmark results", ""]
+
+    if perf:
+        lines += [
+            "## Throughput & latency vs concurrency",
+            "",
+            "| concurrency | output tok/s | total tok/s | mean TTFT (ms) | P99 TTFT (ms) | mean TPOT (ms) | P99 TPOT (ms) |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+        for r in perf:
+            lines.append(
+                f"| {int(r['concurrency'])} | {_fmt(r['out_tput'])} | {_fmt(r['total_tput'])} "
+                f"| {_fmt(r['mean_ttft'])} | {_fmt(r['p99_ttft'])} "
+                f"| {_fmt(r['mean_tpot'])} | {_fmt(r['p99_tpot'])} |")
+        lines.append("")
+
+    if summary_rows:
+        lines += [
+            "## Energy per output token vs concurrency",
+            "",
+            "| concurrency | J/token (raw) | J/token (dynamic) |",
+            "| ---: | ---: | ---: |",
+        ]
+        for r in summary_rows:
+            lines.append(
+                f"| {int(fnum(r['concurrency']))} "
+                f"| {_fmt(fnum(r.get('J_per_out_token')), 3)} "
+                f"| {_fmt(fnum(r.get('J_per_out_token_dyn')), 3)} |")
+        lines.append("")
+
+    if not perf and not summary_rows:
+        print("no data for tables; skipping results.md"); return
+    with open(out, "w") as f:
+        f.write("\n".join(lines))
+    print(f"wrote {out}")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--summary", default=None,
@@ -175,8 +220,10 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
 
     # Energy plots need the sampler outputs; skip them when running without energy_sampler.
+    summary_rows = []
     if args.summary:
-        plot_jtoken(args.summary, os.path.join(args.outdir, "jtoken_vs_concurrency.png"))
+        summary_rows = load_summary(args.summary)
+        plot_jtoken(summary_rows, os.path.join(args.outdir, "jtoken_vs_concurrency.png"))
     else:
         print("no --summary; skipping J/token plot")
     if args.csv:
@@ -185,12 +232,16 @@ def main():
         print("no --csv; skipping power plot")
 
     # Throughput/latency come from the benchmark result JSONs, no energy data needed.
+    perf = []
     if args.windows and os.path.exists(args.windows):
         perf = load_perf(args.windows)
         plot_throughput(perf, os.path.join(args.outdir, "throughput_vs_concurrency.png"))
         plot_latency(perf,    os.path.join(args.outdir, "latency_vs_concurrency.png"))
     else:
         print("no --windows; skipping throughput/latency plots")
+
+    # Dump every plotted number as Markdown tables for pasting into docs.
+    write_tables(perf, summary_rows, os.path.join(args.outdir, "results.md"))
 
 if __name__ == "__main__":
     main()

@@ -53,7 +53,11 @@ def main():
     ap.add_argument("--gpu", type=int, default=0)
     args = ap.parse_args()
 
-    os.makedirs(args.outdir, exist_ok=True)
+    try:
+        os.makedirs(args.outdir)
+    except FileExistsError:
+        print(f"[sweep] outdir {args.outdir} already exists. Use a different --outdir.", flush=True)
+        return
     windows_path = os.path.join(args.outdir, "windows.jsonl")
     levels = [int(x) for x in args.concurrency.split(",")]
 
@@ -68,7 +72,7 @@ def main():
     def record(label, concurrency, phase, t0, t1, result=None):
         rec = {"label": label, "concurrency": concurrency, "phase": phase,
                "t_start": t0, "t_end": t1, "result_json": result}
-        with open(windows_path, "w") as f:
+        with open(windows_path, "a") as f:
             f.write(json.dumps(rec) + "\n")
         print(f"[sweep] window recorded: {label}/{phase} "
               f"({t1-t0:.1f}s){'' if not result else ' -> '+result}", flush=True)
