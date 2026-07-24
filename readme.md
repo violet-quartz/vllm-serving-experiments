@@ -67,4 +67,4 @@ curl http://localhost:8000/v1/chat/completions \
 | 实验 | 说明 | 文档 |
 | --- | --- | --- |
 | 并发性能压测 | 压测不同并发下的服务性能数据 | [experiments/exp_concurrency_performance.md](experiments/exp_concurrency_performance.md) |
-| 量化模型对比 | 对比模型量化前后的性能、能耗与正确率 | [experiments/exp_quantized_model.md](experiments/exp_quantized_model.md) |
+| fp8 量化模型对比 | 对比模型量化前后的性能、精度与能耗 | [experiments/exp_quantized_model.md](experiments/exp_quantized_model.md) |

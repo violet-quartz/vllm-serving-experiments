@@ -1,0 +1,17 @@
+{
+  "idle_power_W": 17.041925341069728,
+  "rows": [
+    {
+      "level": "c48",
+      "concurrency": 48,
+      "dur_s": 87.4,
+      "energy_J": 26065.1,
+      "avg_power_W": 298.3,
+      "steady_power_W": 370.4,
+      "steady_frac": 0.822,
+      "out_tokens": null,
+      "in_tokens": null,
+      "requests": null
+    }
+  ]
+}
