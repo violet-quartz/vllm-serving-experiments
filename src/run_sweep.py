@@ -10,9 +10,6 @@ can report both raw and idle-adjusted J/token.
 
 It writes windows.jsonl (one JSON object per line). It does NOT read energy itself —
 the standalone sampler does that. Same host + same wall clock => windows align cleanly.
-
-The ONLY engine-specific code is build_bench_cmd(). Point it at SGLang/TGI/etc. by
-editing that one function; everything downstream is unchanged.
 """
 import argparse, json, os, signal, subprocess, sys, time
 
@@ -71,7 +68,7 @@ def main():
     def record(label, concurrency, phase, t0, t1, result=None):
         rec = {"label": label, "concurrency": concurrency, "phase": phase,
                "t_start": t0, "t_end": t1, "result_json": result}
-        with open(windows_path, "a") as f:
+        with open(windows_path, "w") as f:
             f.write(json.dumps(rec) + "\n")
         print(f"[sweep] window recorded: {label}/{phase} "
               f"({t1-t0:.1f}s){'' if not result else ' -> '+result}", flush=True)
