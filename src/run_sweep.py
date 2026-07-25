@@ -5,8 +5,8 @@ run_sweep.py — drives sweep and records energy WINDOWS.
 For each concurrency level it does:
   1. warmup run  (discarded — avoids cold-start / CUDA-graph capture in the numbers)
   2. measured run (records t_start / t_end around the real `vllm bench serve` call)
-It also records ONE idle window up front (model loaded, no traffic) so analyze.py
-can report both raw and idle-adjusted J/token.
+It also records ONE idle window up front (model loaded, no traffic) so plot.py can
+shade the idle stretch on the power-over-time figure.
 
 It writes windows.jsonl (one JSON object per line). It does NOT read energy itself —
 the standalone sampler does that. Same host + same wall clock => windows align cleanly.
