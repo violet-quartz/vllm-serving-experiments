@@ -4,10 +4,4 @@
 
 | concurrency | output tok/s | total tok/s | mean TTFT (ms) | P99 TTFT (ms) | mean TPOT (ms) | P99 TPOT (ms) |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 48 | 1796.7 | 3751.7 | 158.1 | 1248.4 | 24.1 | 44.9 |
-
-## Energy per output token vs concurrency
-
-| concurrency | J/token (raw) | J/token (dynamic) |
-| ---: | ---: | ---: |
-| 48 | - | - |
+| 64 | 2198.2 | 4992.9 | 179.5 | 1696.4 | 27.6 | 51.2 |

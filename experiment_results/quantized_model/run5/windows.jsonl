@@ -1,2 +1,0 @@
-{"label": "idle", "concurrency": 0, "phase": "idle", "t_start": 1784891363.1267297, "t_end": 1784891393.1268144, "result_json": null}
-{"label": "c48", "concurrency": 48, "phase": "measured", "t_start": 1784891428.1543348, "t_end": 1784891515.5201433, "result_json": "run5/result_c48.json"}

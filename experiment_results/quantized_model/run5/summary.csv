@@ -1,2 +1,0 @@
-level,concurrency,dur_s,energy_J,avg_power_W,steady_power_W,steady_frac,out_tokens,J_per_out_token,J_per_out_token_dyn,J_per_total_token,J_per_request
-c48,48,87.4,26065.1,298.3,370.4,0.822,,,,,
