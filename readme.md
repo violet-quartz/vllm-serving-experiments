@@ -2,13 +2,20 @@
 
 本仓库基于 vLLM 引擎部署大模型服务，并围绕推理优化开展一系列实验，旨在实践常见的推理优化方法并观察其实际效果。
 
-## 1 实验环境
+## 1 实验列表
 
-### 1.1 机器与镜像
+| 实验 | 说明 | 文档 |
+| --- | --- | --- |
+| 并发性能压测 | 压测不同并发下的服务性能数据 | [experiments/exp_concurrency_performance.md](experiments/exp_concurrency_performance.md) |
+| fp8 量化模型对比 | 对比模型量化前后的性能、精度与能耗 | [experiments/exp_quantized_model.md](experiments/exp_quantized_model.md) |
+
+## 2 准备实验环境
+
+### 2.1 机器与镜像
 
 在 [AutoDL](https://www.autodl.com/) 上租用一台 RTX 4090 实例，基础镜像为 Python 3.12 + PyTorch 2.12.1 + CUDA 13.0。
 
-### 1.2 安装 vLLM
+### 2.2 安装 vLLM
 
 ```bash
 pip install vllm
@@ -21,7 +28,7 @@ vllm --version
 # 0.25.1
 ```
 
-### 1.3 下载初始模型
+### 2.3 下载初始模型
 
 从 ModelScope 下载模型（国内网络友好）：
 
@@ -31,7 +38,7 @@ modelscope download --model Qwen/Qwen2.5-7B-Instruct \
     --local_dir /root/autodl-tmp/qwen2_5-7b-instruct
 ```
 
-### 1.4 启动 vLLM 服务
+### 2.4 启动 vLLM 服务
 
 ```bash
 vllm serve /root/autodl-tmp/qwen2_5-7b-instruct/ \
@@ -39,7 +46,7 @@ vllm serve /root/autodl-tmp/qwen2_5-7b-instruct/ \
     --port 8000
 ```
 
-### 1.5 验证服务
+### 2.5 验证服务
 
 另开一个终端发起请求。
 
@@ -61,10 +68,3 @@ curl http://localhost:8000/v1/chat/completions \
 ```
 
 能够正确返回回复，说明服务已就绪。
-
-## 2 实验内容
-
-| 实验 | 说明 | 文档 |
-| --- | --- | --- |
-| 并发性能压测 | 压测不同并发下的服务性能数据 | [experiments/exp_concurrency_performance.md](experiments/exp_concurrency_performance.md) |
-| fp8 量化模型对比 | 对比模型量化前后的性能、精度与能耗 | [experiments/exp_quantized_model.md](experiments/exp_quantized_model.md) |
